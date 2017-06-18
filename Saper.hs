@@ -1,4 +1,4 @@
-import Data.Map
+import Data.Map as Map
 import Data.Set
 import Graphics.Gloss
 import Graphics.Gloss.Data.ViewPort
@@ -15,9 +15,9 @@ fieldSize@(fieldWidth, fieldHeight) = (15, 15) :: (Int, Int)
 mineCount = 40 :: Int
 
 createField :: Field
-createField = Data.Map.empty
+createField = Map.empty
 
-type Field = Map Cell CellState --не забудем дописать вначале import Data.Map
+type Field = Map Cell CellState --не забудем дописать вначале import import Data.Map
 type Cell = (Int, Int)
 
 data CellState = Opened Int --Открыта; параметр — циферка, которая будет отображаться
@@ -41,7 +41,7 @@ data GameState = GS
     }
 
 startGame :: StdGen -> IO ()
-startGame gen = play (InWindow "Hsweeper" windowSize (240, 160)) white 30 (initState gen) renderer handler updater
+startGame gen = play (InWindow "2IPH0" windowSize (240, 160)) white 30 (initState gen) renderer handler updater
 
 windowSize = both (* (round cellSize)) fieldSize
 cellSize = 24 :: Float
@@ -69,20 +69,20 @@ handler (EventKey (MouseButton LeftButton) Down _ mouse) gs@GS
     , gameOver = exploded
     } where
     newField = click cell field
-    exploded = case Data.Map.lookup cell newField of --Проигрыш, если последняя вскрытая клетка - мина
+    exploded = case Map.lookup cell newField of --Проигрыш, если последняя вскрытая клетка - мина
         Just Mine -> True
         _         -> False
     cell@(cx, cy) = screenToCell mouse
     click :: Cell -> Field -> Field
     click c@(cx, cy) f
-        | c `Data.Map.member` f     = f --повторно клетку не обрабатываем
+        | c `Map.member` f     = f --повторно клетку не обрабатываем
         | c `Data.Set.member` mines = put Mine --попались на мину
         | otherwise = let nf = put (Opened neighbours) in
             if neighbours == 0
                 then Prelude.foldr click nf neighbourCells --Обойдём соседей
                 else nf
         where
-            put state = Data.Map.insert c state f
+            put state = Map.insert c state f
             neighbourCells = [ (i, j) | i <- [cx - 1 .. cx + 1], j <- [cy - 1 .. cy + 1]
                              , 0 <= i && i < fieldWidth
                              , 0 <= j && j < fieldHeight
@@ -92,9 +92,9 @@ handler (EventKey (MouseButton LeftButton) Down _ mouse) gs@GS
 
 handler (EventKey (MouseButton RightButton) Down _ mouse) gs@GS
     { field = field
-    } = case Data.Map.lookup coord field of
-        Nothing -> gs { field = Data.Map.insert coord Flag field }
-        Just Flag -> gs { field = Data.Map.delete coord field }
+    } = case Map.lookup coord field of
+        Nothing -> gs { field = Map.insert coord Flag field }
+        Just Flag -> gs { field = Map.delete coord field }
         _ -> gs
         where coord = screenToCell mouse
 handler _ gs = gs
@@ -103,7 +103,7 @@ screenToCell = both (round . (/ cellSize)) . invertViewPort viewPort
 renderer GS { field = field } = applyViewPortToPicture viewPort $ pictures $ cells ++ grid where
     grid = [uncurry translate (cellToScreen (x, y)) $ color black $ rectangleWire cellSize cellSize | x <- [0 .. fieldWidth - 1], y <- [0 .. fieldHeight - 1]]
     cells = [uncurry translate (cellToScreen (x, y)) $ drawCell x y | x <- [0 .. fieldWidth - 1], y <- [0 .. fieldHeight - 1]]
-    drawCell x y = case Data.Map.lookup (x, y) field of
+    drawCell x y = case Map.lookup (x, y) field of
         Nothing         -> color white $ rectangleSolid cellSize cellSize --клетка пустая
         Just Mine       -> pictures [ color red $ rectangleSolid cellSize cellSize
                                     , label "M"
