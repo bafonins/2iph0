@@ -222,19 +222,27 @@ actionHandler (EventKey (MouseButton LeftButton) Down _ mouse) gameState =
                                         then openCellSafe   -- just open a cell
                                         else openAllSafe    -- go through all neighbours
                         where
-                            -- explore neighbours 
+                            -- explore neighbours
+                            neighbours :: [Cell]
                             neighbours = Prelude.filter checkBounds
                                 $ Prelude.map (\(a, b) -> (a + c1, b + c2)) moves
                                     where
                                         checkBounds = \(a, b) -> (0 <= a && a < x) && (0 <= b && b < y) -- ensure we dont leave the grid
                                         moves = [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] -- steps to explore cells around
 
+                            countNeighbours :: Int
                             countNeighbours = length $ Prelude.filter (`Set.member` m) neighbours
+
+                            isMineNeighbour :: Bool
                             isMineNeighbour = not $ (0 ==) countNeighbours
 
+                            openCellSafe :: Field
                             openCellSafe = addCell (c1, c2) (Checked countNeighbours) f
-                            openAllSafe = Prelude.foldr event openCellSafe neighbours
 
+                            openAllSafe :: Field
+                            openAllSafe = Prelude.foldr event openCellSafe neighbours
+                            
+                            openAllMines :: Field
                             openAllMines = Prelude.foldr event openCellMine $ Set.elems m
                                 where openCellMine = addCell (c1, c2) Mine f
 
