@@ -1,66 +1,154 @@
+import System.Random
+import System.Random.Shuffle (shuffle')
 import Data.Map as Map
 import Data.Set as Set
+import Data.Either.Unwrap
 import Graphics.Gloss
 import Graphics.Gloss.Data.ViewPort
 import Graphics.Gloss.Interface.Pure.Game
-import System.Random
-import System.Random.Shuffle (shuffle')
+import System.IO.Unsafe
+import System.IO
+-- import Data.Either.Unwrap
+--import Prelude (foldr, filter, map) -- avoid name clash
 
 
 -- game entry point
 main :: IO ()
-main = 
-    putStrLn "the number of cells NxN, N = ?" >>
-    getLine >>= \ n ->
-    putStrLn "#mines = ?" >>
-    getLine >>= \ m ->
-    putStrLn ("cells = " ++ n ++ ", mines = " ++ m) >>
-    getStdGen >>= \ g -> game g
+main = do 
+        putStr $ "Choose difficulty : \n"
+            ++ "Type '1' for (Beginner) \n"
+            ++ "Type '2' for Intermediate \n"
+            ++ "Type '3' for Expert \n"
+        hFlush stdout                           -- make sure the string is flushed
+        m <- getLine                            -- read the users input
+        generator <- getStdGen                  -- get a random number generator
+        let mode = getMode m                    -- convert string to a Mode object
+        putStr ((show mode) ++ " is chosen.")   -- inform the user about the mode
+        hFlush stdout
+        play (InWindow "2IPH0" (getWindow $ playgroundSize mode) (300, 300)) -- window settings
+            white                               -- background color
+            50                                  -- update rate
+            (getInitialModel generator mode)    -- initial state of the game
+            view                                -- graphics render
+            actionHandler                       -- click/press listener
+            stub                        
+            where 
+                stub _ = id
+                getWindow c = applyBoth (* (round cellSize)) c -- cellSize is hardcoded
 
 ---------------------------------
 --          Constants          --
 ---------------------------------
-    
--- define the playground as a 15x15 grid
-fieldGridSize@(fieldW, fieldH) = (15, 15) :: (Int, Int)
--- the number of mines
-minesNr = 40 :: Int
+
+cellSize :: Float
+cellSize = 30
 
 ---------------------------------
 --       Helper functions      --
 ---------------------------------
 
 -- simply shuffle cells of the grid
-shuffle g l = shuffle' l (fieldW * fieldH - 1) g
+mineShuffle :: RandomGen g => g -> Mode -> [Cell] -> [Cell]
+mineShuffle g m l = shuffle' l (h * w  - 1) g
+    where
+        w = fst $ playgroundSize m
+        h = snd $ playgroundSize m
 
 -- applies function to each element of the pair
 applyBoth :: (a -> b) -> (a, a) -> (b, b)
-applyBoth g (k, c) = (g k, g c)
+applyBoth g pair = (g $ fst pair, g $ snd pair)
 
--- TODO: doc
-createMines :: RandomGen g => g -> Cell -> Mines
-createMines rndGen cell = Set.fromList $ take minesNr $ shuffle rndGen $
-    [(i, j) | i <- [0 .. fieldW - 1] , j <- [0 .. fieldH - 1], not $ (i, j) == cell]
+-- Generate random mines, such that none of them is equal to the cell
+-- that the user initially clicked on
+generateMines :: RandomGen g => g -> Cell -> Mode -> Mines
+generateMines rndGen initialCell mode = Set.fromList 
+    $ take mines
+    $ mineShuffle rndGen mode 
+    $ [(a, b) | a <- [0 .. x - 1] , b <- [0 .. y - 1], not $ (a, b) == initialCell]
+        where
+            x = fst $ playgroundSize mode
+            y = snd $ playgroundSize mode
+            mines = minesNr mode               
 
 -- checks if the cells within the field is a mine
 isMine :: Cell -> Field -> Bool
 isMine c f = case Map.lookup c f of
-    (Just Mine)   -> True
+    (Just Mine) -> True
     _           -> False
 
-
+-- add the cell to a map
 addCell :: Cell -> CellState -> Field -> Field
 addCell cell state field = Map.insert cell state field
+
+-- maps a cell to the screen
+mapCell :: (Int, Int) -> (Float, Float)
+mapCell = applyBoth ((* cellSize) . fromIntegral)
+
+-- convert a string to a Model object
+getMode :: String -> Mode
+getMode "2"   =  Mode "Intermediate"(15, 15) 40
+getMode "3"   =  Mode "Expert" (30, 15) 99
+getMode _     =  Mode "Beginner" (10, 10) 10
+
+-- get the initial state of the game
+getInitialModel :: StdGen -> Mode -> GameState
+getInitialModel g m = GameState (Map.fromList []) (Left g) m False 
+
+-- maps the screen to a cell
+mapScreen :: (Float, Float) -> (Int, Int) -> (Int, Int)
+mapScreen screen grid = applyBoth (round . (/ cellSize)) (invertViewPort (viewPort grid) screen)
+
+-- translates the grid properly
+viewPort :: (Int, Int) -> ViewPort
+viewPort (x, y) = ViewPort (applyBoth (negate . (/ 2) . (subtract cellSize)) $ mapCell (x, y)) 0 1
+
+clickEvent :: GameState -> Cell -> Field -> Field
+clickEvent gs (c1, c2) f
+    | Map.member (c1, c2) f       = f               -- do not process a cell more than once
+    | Set.member (c1, c2) m       = openAllMines    -- lost, open all mines
+    | otherwise = if isMineNeighbour
+                    then openCellSafe               -- just open a cell
+                    else openAllSafe                -- go through all neighbours
+    where
+        mode = mode gs
+        -- explore neighbours 
+        neighbours = Prelude.filter checkBounds
+            $ Prelude.map (\(a, b) -> (a + c1, b + c2)) moves
+                where
+                    checkBounds = \(a, b) -> (0 <= a && a < x) && (0 <= b && b < y) -- ensure we dont leave the grid
+                    moves = [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] -- steps to explore cells around
+
+        countNeighbours = length $ Prelude.filter (`Set.member` m) neighbours
+        isMineNeighbour = not $ (0 ==) countNeighbours
+
+        openCellSafe = addCell (c1, c2) (Checked countNeighbours) f
+        openAllSafe = Prelude.foldr (clickEvent gs) openCellSafe neighbours
+
+        openAllMines = Prelude.foldr (clickEvent gs) openCellMine $ Set.elems m
+            where openCellMine = addCell (c1, c2) Mine f
+
+        x = fst $ playgroundSize mode
+        y = snd $ playgroundSize mode 
 
 ---------------------------------
 --           Types             --
 ---------------------------------
 
-createField :: Field
-createField = Map.fromList []
-
+-- the playground
 type Field = Map Cell CellState
+
+-- the mode chosen by the user. it influences a certain number of cells and mines.
+data Mode = Mode 
+    {
+        name                :: [Char],
+        playgroundSize      :: (Int, Int),
+        minesNr             :: Int
+    } deriving Show
+
+-- a cell
 type Cell = (Int, Int)
+
+-- a collection of mines
 type Mines = Set Cell
 
 -- saves state of the cell, it can be :
@@ -71,10 +159,11 @@ type Mines = Set Cell
 data CellState = Checked Int | Mine | Flag
 
 -- keeps the state of the game
-data GameState = GS
+data GameState = GameState 
     { 
-        field   :: Field, 
+        field   :: Field,
         mines   :: Either StdGen Mines,
+        mode    :: Mode, 
         isOver  :: Bool
     }
 
@@ -82,80 +171,133 @@ data GameState = GS
 -- Define behaviour of the GUI --
 ---------------------------------
 
--- iniial state
-ini gen = GS createField (Left gen) False
+-- defines logic to render GUI
+view :: GameState -> Picture
+view GameState { field = fld, mode = mode } 
+    = applyViewPortToPicture (viewPort gridSize) $ pictures [cells, grid, logos] --pictures $ [cells, grid] 
+    where
+        gridSize = playgroundSize mode
 
-game :: StdGen -> IO ()
--- 'play' is for Gloss to manage custom mouse press events
-game gen = play (InWindow "2IPH0" windowSize (500, 500)) white 50 (ini gen) renderer eventHandler id
+        -- creates a wireframed rectangle than defines a unit of a grid
+        drawGrid :: Picture
+        drawGrid = rectangleWire cellSize cellSize
 
--- map cells to the screen and place them proerly
-windowSize = applyBoth (* (round cellSize)) fieldGridSize
-cellSize = 24 :: Float
-cellToScreen = applyBoth ((* cellSize) . fromIntegral)
-viewPort = ViewPort (applyBoth (negate . (/ 2) . (subtract cellSize)) $ cellToScreen fieldGridSize) 0 1
+        -- creates a solid rectangle that defines a single cell
+        drawCell :: Picture
+        drawCell = rectangleSolid cellSize cellSize
 
--- events
-eventHandler (EventKey (MouseButton LeftButton) Down _ mouse) gs@GS
-    { 
-        mines = Left gen
-    } = gs 
-        { mines = Right $ createMines gen cell }
+        -- generates a list of grid coordinates
+        generateRangeToScreen :: [(Int, Int)]
+        generateRangeToScreen = [(x, y) | x <- [0 .. (fst gridSize) - 1], y <- [0 .. (snd gridSize) - 1]]
+
+        -- combines properties of a picture into one complete image 
+        combine :: (Int, Int) -> Color -> Picture -> Picture
+        combine cell clr fig = translate x y $ color clr $ fig
             where
-                cell = screenToCell mouse
+                x = fst $ mapCell cell
+                y = snd $ mapCell cell
 
-eventHandler (EventKey (MouseButton LeftButton) Down _ mouse) gs@GS
-    { 
-        field = field, 
-        mines = Right mines,
-        isOver = False
-    } = gs
-    { 
-        field = renewedField,
-        isOver = mineExploded
-    } where
-        mineExploded = isMine cell renewedField
-        renewedField = click cell field
-        cell@(cx, cy) = screenToCell mouse
-        click :: Cell -> Field -> Field
-        click c@(cx, cy) f
-            | Map.member c f       = f                  -- do not process a cell more than once
-            | Set.member c mines   = addCell c Mine f   -- mine
-            | otherwise = let nf = addCell c (Checked neighbours) f in
-                if neighbours == 0
-                    then Prelude.foldr click nf neighbourCells -- Go through all neighbours
-                    else nf
-            where
-                neighbourCells = [ (i, j) | i <- [cx - 1 .. cx + 1], j <- [cy - 1 .. cy + 1]
-                                , 0 <= i && i < fieldW
-                                , 0 <= j && j < fieldH
-                                ] -- ;( 0 <= i < fieldW
-                neighbours = length $ Prelude.filter (`Set.member` mines) neighbourCells
-
-eventHandler (EventKey (MouseButton RightButton) Down _ mouse) gs@GS
-    { 
-        field = field
-    } = case Map.lookup coord field of
-            Nothing -> gs { field = Map.insert coord Flag field }
-            Just Flag -> gs { field = Map.delete coord field }
-            _ -> gs
+        grid :: Picture
+        grid = pictures [ combine c black drawGrid | c <- generateRangeToScreen ]
+        cells :: Picture
+        cells = pictures [ combine c (colorCell $ Map.lookup c fld) drawCell | c <- generateRangeToScreen ]
             where 
-                coord = screenToCell mouse
-eventHandler _ gs = gs
-screenToCell = applyBoth (round . (/ cellSize)) . invertViewPort viewPort
+                colorCell :: Maybe CellState ->  Color
+                colorCell Nothing               = white
+                colorCell (Just Mine)           = red
+                colorCell (Just (Checked val))  = green
+                colorCell _                     = yellow
+        
+        logos = pictures [ combine c black $ place $ text (tagCell $ Map.lookup c fld) | c <- generateRangeToScreen ]
+            where
+                tagCell :: Maybe CellState -> [Char]
+                tagCell (Just Mine)           = ";("
+                tagCell (Just (Checked val))  = show val
+                tagCell (Just Flag)           = "F"
+                tagCell _                     = ""
 
-renderer GS { field = field } = applyViewPortToPicture viewPort $ pictures $ cells ++ grid where
-    grid = [uncurry translate (cellToScreen (x, y)) $ color black $ rectangleWire cellSize cellSize | x <- [0 .. fieldW - 1], y <- [0 .. fieldH - 1]]
-    cells = [uncurry translate (cellToScreen (x, y)) $ drawCell x y | x <- [0 .. fieldW - 1], y <- [0 .. fieldH - 1]]
-    drawCell x y = case Map.lookup (x, y) field of
-        Nothing         -> color white $ rectangleSolid cellSize cellSize -- the empty cell
-        Just Mine       -> pictures [ color red $ rectangleSolid cellSize cellSize
-                                    , label "M"
-                                    ]
-        Just (Checked n) -> pictures [ color green $ rectangleSolid cellSize cellSize
-                                    , label $ show n
-                                    ]
-        Just Flag       -> pictures [ color yellow $ rectangleSolid cellSize cellSize
-                                    , label "F"
-                                    ]
-    label = translate (-5) (-5) . scale 0.14 0.14 . color black . text -- place labels properly
+                place = translate (-5) (-5) . scale 0.1 0.1 . color black
+                
+---------------------------------
+--        Events handlers      --
+---------------------------------
+actionHandler :: Event -> GameState -> GameState
+-- left mouse click action
+actionHandler (EventKey (MouseButton LeftButton) Down _ mouse) gameState =
+    case gameState of
+        GameState { mines = (Left g), field = f, mode = mode } -> GameState 
+            { 
+                mines = Right (generateMines g (mapScreen mouse gridSize) mode),
+                isOver = False,
+                field = f,
+                mode = mode
+            }
+                where gridSize = playgroundSize mode 
+        GameState { mines = (Right m), field = fld, isOver = False, mode = mode } -> 
+            GameState
+                {
+                    field = event (mapScreen mouse gridSize) fld,
+                    isOver = isMine (mapScreen mouse gridSize) renewedField,
+                    mines = (Right m),
+                    mode = mode
+                } where
+                    gridSize = playgroundSize mode 
+                    renewedField = event (mapScreen mouse gridSize) fld
+                    event :: Cell -> Field -> Field
+                    event (c1, c2) f
+                        | Map.member (c1, c2) f       = f           -- do not process a cell more than once
+                        | Set.member (c1, c2) m       = openAllMines -- lost, open all mines
+                        | otherwise = if isMineNeighbour
+                                        then openCellSafe   -- just open a cell
+                                        else openAllSafe    -- go through all neighbours
+                        where
+                            -- explore neighbours 
+                            neighbours = Prelude.filter checkBounds
+                                $ Prelude.map (\(a, b) -> (a + c1, b + c2)) moves
+                                    where
+                                        checkBounds = \(a, b) -> (0 <= a && a < x) && (0 <= b && b < y) -- ensure we dont leave the grid
+                                        moves = [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] -- steps to explore cells around
+
+                            countNeighbours = length $ Prelude.filter (`Set.member` m) neighbours
+                            isMineNeighbour = not $ (0 ==) countNeighbours
+
+                            openCellSafe = addCell (c1, c2) (Checked countNeighbours) f
+                            openAllSafe = Prelude.foldr event openCellSafe neighbours
+
+                            openAllMines = Prelude.foldr event openCellMine $ Set.elems m
+                                where openCellMine = addCell (c1, c2) Mine f
+
+                            x = fst $ playgroundSize mode
+                            y = snd $ playgroundSize mode  
+        gs -> gs
+-- right mouse click action
+actionHandler (EventKey (MouseButton RightButton) Down m mouse) GameState 
+    { 
+        field = fld, 
+        mines = (Right mines), 
+        isOver = False,
+        mode = mode 
+    }
+     = case Map.lookup (mapScreen mouse gridSize) fld of
+            Nothing -> GameState -- add flag 
+                {
+                    field = Map.insert (mapScreen mouse gridSize) Flag fld,
+                    mines = (Right mines),
+                    isOver = False, 
+                    mode = mode 
+                }
+            Just Flag -> GameState -- remove flag
+                { 
+                    field = Map.delete (mapScreen mouse gridSize) fld,
+                    mines = (Right mines), 
+                    isOver = False, 
+                    mode = mode 
+                }
+            where
+                gridSize = playgroundSize mode
+-- restart game
+actionHandler (EventKey (Char 'r') Down _ _) GameState { isOver = True, mode = mode }
+    -- use newStdGen instead of simply getStdgen - to the current global random generator, updates it with one of the results, and returns the other.
+     = let gen = unsafePerformIO newStdGen in getInitialModel gen mode
+
+actionHandler _ gs = gs -- do not support other actions
