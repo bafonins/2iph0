@@ -7,6 +7,7 @@ import Graphics.Gloss.Data.ViewPort
 import Graphics.Gloss.Interface.Pure.Game
 import System.IO.Unsafe
 import System.IO
+import Data.Either
 -- import Data.Either.Unwrap
 --import Prelude (foldr, filter, map) -- avoid name clash
 
@@ -194,62 +195,79 @@ view GameState { field = fld, mode = mode }
 ---------------------------------
 actionHandler :: Event -> GameState -> GameState
 -- left mouse click action
-actionHandler (EventKey (MouseButton LeftButton) Down _ mouse) gameState =
-    case gameState of
-        GameState { mines = (Left m), field = fld, mode = mode } -> GameState 
+actionHandler (EventKey (MouseButton LeftButton) Down _ mouse) GameState
+    {
+        field = fld,
+        mode = mode,
+        mines = ms,
+        isOver = over
+    } =
+    case ms of
+        (Left m) -> GameState 
             { 
-                mines = Right (generateMines m (mapScreen mouse gridSize) mode),
+                mines = (Right getMines),
+                field = event (mapScreen mouse gridSize) fld,
                 isOver = False,
-                field = fld,
                 mode = mode
             }
-                where 
-                    gridSize = playgroundSize mode 
-        GameState { mines = (Right m), field = fld, isOver = False, mode = mode } -> 
-            GameState
+        (Right m) -> if not over 
+            then GameState
                 {
                     field = event (mapScreen mouse gridSize) fld,
                     isOver = isMine (mapScreen mouse gridSize) renewedField,
                     mines = (Right m),
                     mode = mode
-                } where
-                    gridSize = playgroundSize mode 
-                    renewedField = event (mapScreen mouse gridSize) fld
-                    event :: Cell -> Field -> Field
-                    event (c1, c2) f
-                        | Map.member (c1, c2) f       = f           -- do not process a cell more than once
-                        | Set.member (c1, c2) m       = openAllMines -- lost, open all mines
-                        | otherwise = if isMineNeighbour
-                                        then openCellSafe   -- just open a cell
-                                        else openAllSafe    -- go through all neighbours
-                        where
-                            -- explore neighbours
-                            neighbours :: [Cell]
-                            neighbours = Prelude.filter checkBounds
-                                $ Prelude.map (\(a, b) -> (a + c1, b + c2)) moves
-                                    where
-                                        checkBounds = \(a, b) -> (0 <= a && a < x) && (0 <= b && b < y) -- ensure we dont leave the grid
-                                        moves = [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] -- steps to explore cells around
+                } 
+            else    
+                GameState 
+                {
+                    field = fld,
+                    mines = ms,
+                    isOver = over,
+                    mode = mode
+                }
+        where
+            gridSize = playgroundSize mode 
+            renewedField = event (mapScreen mouse gridSize) fld
+            getMines :: Mines
+            getMines = case ms of
+                (Right v) -> v
+                (Left v) -> generateMines v (mapScreen mouse gridSize) mode
+            event :: Cell -> Field -> Field
+            event (c1, c2) f
+                | Map.member (c1, c2) f         = f             -- do not process a cell more than once
+                | Set.member (c1, c2) getMines  = openAllMines   -- lost, open all mines
+                | otherwise = if isMineNeighbour
+                                then openCellSafe           -- just open a cell
+                                else openAllSafe            -- open all safe neighbours
+                where
+                    -- explore neighbours
+                    neighbours :: [Cell]
+                    neighbours = Prelude.filter checkBounds
+                        $ Prelude.map (\(a, b) -> (a + c1, b + c2)) moves
+                            where
+                                checkBounds = \(a, b) -> (0 <= a && a < x) && (0 <= b && b < y) -- ensure we dont leave the grid
+                                moves = [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] -- steps to explore cells around
 
-                            countNeighbours :: Int
-                            countNeighbours = length $ Prelude.filter (`Set.member` m) neighbours
+                    countNeighbours :: Int
+                    countNeighbours = length $ Prelude.filter (`Set.member` getMines) neighbours
 
-                            isMineNeighbour :: Bool
-                            isMineNeighbour = not $ (0 ==) countNeighbours
+                    isMineNeighbour :: Bool
+                    isMineNeighbour = not $ (0 ==) countNeighbours
 
-                            openCellSafe :: Field
-                            openCellSafe = addCell (c1, c2) (Checked countNeighbours) f
+                    openCellSafe :: Field
+                    openCellSafe = addCell (c1, c2) (Checked countNeighbours) f
 
-                            openAllSafe :: Field
-                            openAllSafe = Prelude.foldr event openCellSafe neighbours
-                            
-                            openAllMines :: Field
-                            openAllMines = Prelude.foldr event openCellMine $ Set.elems m
-                                where openCellMine = addCell (c1, c2) Mine f
+                    openAllSafe :: Field
+                    openAllSafe = Prelude.foldr event openCellSafe neighbours
+                    
+                    openAllMines :: Field
+                    openAllMines = Prelude.foldr event openCellMine $ Set.elems getMines
+                        where openCellMine = addCell (c1, c2) Mine f
 
-                            x = fst $ playgroundSize mode
-                            y = snd $ playgroundSize mode  
-        gs -> gs
+                    x = fst $ playgroundSize mode
+                    y = snd $ playgroundSize mode  
+
 -- right mouse click action
 actionHandler (EventKey (MouseButton RightButton) Down m mouse) GameState 
     { 
@@ -257,8 +275,7 @@ actionHandler (EventKey (MouseButton RightButton) Down m mouse) GameState
         mines = (Right mines), 
         isOver = False,
         mode = mode 
-    }
-     = case Map.lookup (mapScreen mouse gridSize) fld of
+    } = case Map.lookup (mapScreen mouse gridSize) fld of
             Nothing -> GameState -- add flag 
                 {
                     field = Map.insert (mapScreen mouse gridSize) Flag fld,
