@@ -2,7 +2,6 @@ import System.Random
 import System.Random.Shuffle (shuffle')
 import Data.Map as Map
 import Data.Set as Set
-import Data.Either.Unwrap
 import Graphics.Gloss
 import Graphics.Gloss.Data.ViewPort
 import Graphics.Gloss.Interface.Pure.Game
@@ -101,34 +100,6 @@ mapScreen screen grid = applyBoth (round . (/ cellSize)) (invertViewPort (viewPo
 -- translates the grid properly
 viewPort :: (Int, Int) -> ViewPort
 viewPort (x, y) = ViewPort (applyBoth (negate . (/ 2) . (subtract cellSize)) $ mapCell (x, y)) 0 1
-
-clickEvent :: GameState -> Cell -> Field -> Field
-clickEvent gs (c1, c2) f
-    | Map.member (c1, c2) f       = f               -- do not process a cell more than once
-    | Set.member (c1, c2) m       = openAllMines    -- lost, open all mines
-    | otherwise = if isMineNeighbour
-                    then openCellSafe               -- just open a cell
-                    else openAllSafe                -- go through all neighbours
-    where
-        mode = mode gs
-        -- explore neighbours 
-        neighbours = Prelude.filter checkBounds
-            $ Prelude.map (\(a, b) -> (a + c1, b + c2)) moves
-                where
-                    checkBounds = \(a, b) -> (0 <= a && a < x) && (0 <= b && b < y) -- ensure we dont leave the grid
-                    moves = [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] -- steps to explore cells around
-
-        countNeighbours = length $ Prelude.filter (`Set.member` m) neighbours
-        isMineNeighbour = not $ (0 ==) countNeighbours
-
-        openCellSafe = addCell (c1, c2) (Checked countNeighbours) f
-        openAllSafe = Prelude.foldr (clickEvent gs) openCellSafe neighbours
-
-        openAllMines = Prelude.foldr (clickEvent gs) openCellMine $ Set.elems m
-            where openCellMine = addCell (c1, c2) Mine f
-
-        x = fst $ playgroundSize mode
-        y = snd $ playgroundSize mode 
 
 ---------------------------------
 --           Types             --
