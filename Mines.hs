@@ -204,7 +204,7 @@ actionHandler (EventKey (MouseButton LeftButton) Down _ mouse) gameState =
                 mode = mode
             }
                 where 
-                    gridSize = playgroundSize mode
+                    gridSize = playgroundSize mode 
         GameState { mines = (Right m), field = fld, isOver = False, mode = mode } -> 
             GameState
                 {
@@ -266,12 +266,19 @@ actionHandler (EventKey (MouseButton RightButton) Down m mouse) GameState
                     isOver = False, 
                     mode = mode 
                 }
-            Just Flag -> GameState -- remove flag
+            (Just Flag) -> GameState -- remove flag
                 { 
                     field = Map.delete (mapScreen mouse gridSize) fld,
                     mines = (Right mines), 
                     isOver = False, 
                     mode = mode 
+                }
+            (Just _) -> GameState -- ignore anything else
+                { 
+                    field = fld,
+                    mines = (Right mines),
+                    isOver = False,
+                    mode = mode
                 }
             where
                 gridSize = playgroundSize mode
