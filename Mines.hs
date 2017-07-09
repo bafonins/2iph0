@@ -196,14 +196,15 @@ actionHandler :: Event -> GameState -> GameState
 -- left mouse click action
 actionHandler (EventKey (MouseButton LeftButton) Down _ mouse) gameState =
     case gameState of
-        GameState { mines = (Left g), field = f, mode = mode } -> GameState 
+        GameState { mines = (Left m), field = fld, mode = mode } -> GameState 
             { 
-                mines = Right (generateMines g (mapScreen mouse gridSize) mode),
+                mines = Right (generateMines m (mapScreen mouse gridSize) mode),
                 isOver = False,
-                field = f,
+                field = fld,
                 mode = mode
             }
-                where gridSize = playgroundSize mode 
+                where 
+                    gridSize = playgroundSize mode
         GameState { mines = (Right m), field = fld, isOver = False, mode = mode } -> 
             GameState
                 {
